@@ -1,1 +1,100 @@
+name: Send Noticeboard Notification
 
+on:
+  workflow_dispatch: {}
+
+concurrency:
+  group: noticeboard-reminder-run
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check schedules and send due reminders
+        env:
+          BRANCH: ${{ github.ref_name }}
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+        run: |
+          set -e
+
+          IST_TIME=$(TZ='Asia/Kolkata' date +%H:%M)
+          IST_DATE=$(TZ='Asia/Kolkata' date +%F)
+          IST_WEEKDAY=$(TZ='Asia/Kolkata' date +%w)
+
+          echo "IST now: $IST_DATE $IST_TIME (weekday $IST_WEEKDAY)"
+
+          to_minutes() {
+            local h=${1%%:*}
+            local m=${1##*:}
+            echo $((10#$h * 60 + 10#$m))
+          }
+          CUR_MIN=$(to_minutes "$IST_TIME")
+
+          if [ ! -f data/reminders.json ] || ! jq empty data/reminders.json >/dev/null 2>&1; then
+            echo "No valid reminders.json — nothing to check."
+            exit 0
+          fi
+
+          if [ ! -f data/notification-log.json ] || ! jq empty data/notification-log.json >/dev/null 2>&1; then
+            echo "{}" > data/notification-log.json
+          fi
+
+          CHANGED=false
+
+          while IFS= read -r R; do
+            id=$(jq -r '.id' <<<"$R")
+            type=$(jq -r '.type' <<<"$R")
+            time=$(jq -r '.time' <<<"$R")
+            message=$(jq -r '.message' <<<"$R")
+            date=$(jq -r '.date // empty' <<<"$R")
+            weekday=$(jq -r '.weekday // empty' <<<"$R")
+
+            due_today=false
+            case "$type" in
+              once)   [ "$date" = "$IST_DATE" ] && due_today=true ;;
+              daily)  due_today=true ;;
+              weekly) [ "$weekday" = "$IST_WEEKDAY" ] && due_today=true ;;
+            esac
+
+            [ "$due_today" != "true" ] && continue
+
+            TARGET_MIN=$(to_minutes "$time")
+            DIFF=$((CUR_MIN - TARGET_MIN))
+            [ "$DIFF" -lt 0 ] && { echo "$id: not due yet ($time)"; continue; }
+
+            ALREADY_SENT=$(jq -r --arg d "$IST_DATE" --arg id "$id" '.[$d][$id] // false' data/notification-log.json)
+            if [ "$ALREADY_SENT" = "true" ]; then
+              echo "$id: already sent today"
+              continue
+            fi
+
+            echo "$id: due, sending — $message"
+            curl -fsS \
+              -H "Title: Reminder" \
+              -H "Priority: high" \
+              -H "Tags: pushpin" \
+              -d "$message" \
+              "https://ntfy.sh/${NTFY_TOPIC}"
+
+            tmp=$(jq --arg d "$IST_DATE" --arg id "$id" '.[$d] //= {} | .[$d][$id] = true' data/notification-log.json)
+            printf '%s\n' "$tmp" > data/notification-log.json
+            CHANGED=true
+
+          done < <(jq -c '.[]' data/reminders.json)
+
+          if [ "$CHANGED" = "true" ]; then
+            git config user.name "noticeboard-bot"
+            git config user.email "actions@users.noreply.github.com"
+            git add -f data/notification-log.json
+            git commit -m "Update notification log for $IST_DATE"
+            git pull --rebase origin "$BRANCH"
+            git push origin "$BRANCH"
+          else
+            echo "No notifications sent this run."
+          fi
