@@ -1,0 +1,508 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Noticeboard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Zilla+Slab:wght@500;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --cork:#7a4b32;
+    --cork-dark:#5c3722;
+    --cork-light:#8f5b3c;
+    --paper:#f2ecdd;
+    --paper-shadow:#00000055;
+    --ink:#2b2118;
+    --ink-soft:#5a4c3e;
+    --pin-red:#c1392b;
+    --pin-brass:#b08d57;
+    --pin-teal:#3d6b63;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0;
+    min-height:100vh;
+    background-color:var(--cork);
+    background-image:
+      radial-gradient(circle at 20% 30%, var(--cork-light) 0, transparent 55%),
+      radial-gradient(circle at 80% 75%, var(--cork-dark) 0, transparent 55%);
+    font-family:'IBM Plex Mono', monospace;
+    color:var(--ink);
+    padding:0 0 60px;
+  }
+  header{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    padding:28px 32px 12px;
+    max-width:920px;
+    margin:0 auto;
+  }
+  h1{
+    font-family:'Zilla Slab', serif;
+    font-weight:700;
+    font-size:2rem;
+    color:var(--paper);
+    margin:0;
+    letter-spacing:0.5px;
+  }
+  .sub{
+    font-size:0.8rem;
+    color:#f2ecdd99;
+    margin-top:4px;
+  }
+  .icon-btn{
+    background:var(--paper);
+    border:none;
+    color:var(--ink);
+    width:40px;
+    height:40px;
+    border-radius:50%;
+    font-size:1.1rem;
+    cursor:pointer;
+    box-shadow:0 2px 6px var(--paper-shadow);
+  }
+  .board{
+    max-width:920px;
+    margin:20px auto 0;
+    padding:10px 24px;
+    display:grid;
+    grid-template-columns:repeat(auto-fill, minmax(220px, 1fr));
+    gap:34px 28px;
+  }
+  .card{
+    position:relative;
+    background:var(--paper);
+    padding:22px 18px 18px;
+    min-height:140px;
+    box-shadow:2px 6px 14px var(--paper-shadow);
+    transform:rotate(var(--rot));
+  }
+  .pin{
+    position:absolute;
+    top:-11px;
+    left:50%;
+    transform:translateX(-50%);
+    width:18px;
+    height:18px;
+    border-radius:50%;
+    background:radial-gradient(circle at 35% 30%, #ffffffaa, var(--pin-red) 60%);
+    box-shadow:0 3px 4px #00000066;
+  }
+  .card:nth-child(3n+2) .pin{background:radial-gradient(circle at 35% 30%, #ffffffaa, var(--pin-brass) 60%);}
+  .card:nth-child(3n+3) .pin{background:radial-gradient(circle at 35% 30%, #ffffffaa, var(--pin-teal) 60%);}
+  .card .message{
+    font-family:'Zilla Slab', serif;
+    font-size:1.05rem;
+    margin:4px 0 8px;
+    line-height:1.3;
+  }
+  .card .schedule{
+    font-size:0.78rem;
+    color:var(--ink-soft);
+    margin:0 0 16px;
+  }
+  .card-actions{
+    position:absolute;
+    bottom:12px;
+    right:14px;
+  }
+  .card-actions button{
+    background:none;
+    border:none;
+    cursor:pointer;
+    font-size:0.75rem;
+    color:var(--ink-soft);
+    text-decoration:underline;
+    padding:0;
+    font-family:inherit;
+  }
+  .card-actions button:hover{color:var(--ink);}
+  .add-card{
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    min-height:140px;
+    border:2px dashed #ffffff55;
+    background:none;
+    color:#f2ecddcc;
+    font-family:'IBM Plex Mono', monospace;
+    font-size:0.9rem;
+    cursor:pointer;
+    transform:none;
+    box-shadow:none;
+  }
+  .add-card:hover{border-color:#ffffff99; color:var(--paper);}
+  .toolbar{
+    max-width:920px;
+    margin:0 auto;
+    padding:0 32px 8px;
+    display:flex;
+    gap:10px;
+    justify-content:flex-end;
+  }
+  .toolbar button{
+    background:var(--paper);
+    border:none;
+    padding:8px 14px;
+    font-family:'IBM Plex Mono', monospace;
+    font-size:0.78rem;
+    font-weight:600;
+    cursor:pointer;
+    box-shadow:0 2px 6px var(--paper-shadow);
+  }
+  .status{
+    max-width:920px;
+    margin:0 auto;
+    padding:0 32px;
+    font-size:0.75rem;
+    color:#f2ecddaa;
+    min-height:18px;
+  }
+  dialog{
+    border:none;
+    padding:0;
+    background:var(--paper);
+    width:min(420px, 90vw);
+    box-shadow:0 10px 30px #00000088;
+  }
+  dialog::backdrop{background:#00000077;}
+  .dialog-inner{padding:22px;}
+  .dialog-inner h2{
+    font-family:'Zilla Slab', serif;
+    font-size:1.2rem;
+    margin:0 0 16px;
+  }
+  .field{margin-bottom:14px;}
+  .field label{
+    display:block;
+    font-size:0.72rem;
+    color:var(--ink-soft);
+    margin-bottom:5px;
+  }
+  .field input, .field select, .field textarea{
+    width:100%;
+    font-family:'IBM Plex Mono', monospace;
+    font-size:0.85rem;
+    padding:8px;
+    border:1px solid #00000022;
+    background:#fff;
+    color:var(--ink);
+  }
+  .field textarea{resize:vertical; min-height:60px;}
+  .row{display:flex; gap:10px;}
+  .row .field{flex:1;}
+  .dialog-actions{
+    display:flex;
+    justify-content:flex-end;
+    gap:10px;
+    margin-top:6px;
+  }
+  .dialog-actions button{
+    font-family:'IBM Plex Mono', monospace;
+    font-size:0.8rem;
+    padding:8px 16px;
+    border:none;
+    cursor:pointer;
+  }
+  .btn-primary{background:var(--ink); color:var(--paper);}
+  .btn-secondary{background:#00000011; color:var(--ink);}
+  .hint{font-size:0.72rem; color:var(--ink-soft); margin-top:2px;}
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <h1>Noticeboard</h1>
+    <div class="sub" id="countLabel">0 of 5 pinned</div>
+  </div>
+  <button class="icon-btn" id="settingsBtn" title="Settings">&#9881;</button>
+</header>
+
+<div class="toolbar">
+  <button id="refreshBtn">Reload board</button>
+</div>
+<div class="status" id="statusLine"></div>
+
+<div class="board" id="board"></div>
+
+<dialog id="cardDialog">
+  <div class="dialog-inner">
+    <h2>Pin a reminder</h2>
+    <div class="field">
+      <label for="rMessage">Message</label>
+      <textarea id="rMessage" maxlength="300" placeholder="Renew car insurance"></textarea>
+    </div>
+    <div class="field">
+      <label for="rType">Repeats</label>
+      <select id="rType">
+        <option value="once">Once, on a specific day</option>
+        <option value="daily">Daily</option>
+        <option value="weekly">Weekly, on a specific day</option>
+      </select>
+    </div>
+    <div class="row">
+      <div class="field" id="rDateField">
+        <label for="rDate">Date</label>
+        <input id="rDate" type="date">
+      </div>
+      <div class="field" id="rWeekdayField" style="display:none">
+        <label for="rWeekday">Day of week</label>
+        <select id="rWeekday">
+          <option value="0">Sunday</option>
+          <option value="1">Monday</option>
+          <option value="2">Tuesday</option>
+          <option value="3">Wednesday</option>
+          <option value="4">Thursday</option>
+          <option value="5">Friday</option>
+          <option value="6">Saturday</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="rTime">Time</label>
+        <input id="rTime" type="time">
+      </div>
+    </div>
+    <div class="dialog-actions">
+      <button class="btn-secondary" id="cancelBtn">Cancel</button>
+      <button class="btn-primary" id="saveBtn">Pin it</button>
+    </div>
+  </div>
+</dialog>
+
+<dialog id="settingsDialog">
+  <div class="dialog-inner">
+    <h2>Board settings</h2>
+    <div class="field">
+      <label for="ghOwner">GitHub owner</label>
+      <input id="ghOwner" placeholder="your-username">
+    </div>
+    <div class="field">
+      <label for="ghRepo">Repository</label>
+      <input id="ghRepo" placeholder="noticeboard">
+    </div>
+    <div class="field">
+      <label for="ghPath">Data file path</label>
+      <input id="ghPath" placeholder="data/reminders.json">
+    </div>
+    <div class="field">
+      <label for="ghToken">GitHub token (fine-grained, Contents: read/write)</label>
+      <input id="ghToken" type="password" placeholder="github_pat_...">
+      <div class="hint">Stored only in this browser's localStorage.</div>
+    </div>
+    <div class="dialog-actions">
+      <button class="btn-secondary" id="settingsCancel">Close</button>
+      <button class="btn-primary" id="settingsSave">Save</button>
+    </div>
+  </div>
+</dialog>
+
+<script>
+const MAX_REMINDERS = 5;
+const board = document.getElementById('board');
+const statusLine = document.getElementById('statusLine');
+const countLabel = document.getElementById('countLabel');
+const WEEKDAYS = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+
+const cfg = {
+  owner: localStorage.getItem('nb_owner') || '',
+  repo: localStorage.getItem('nb_repo') || '',
+  path: localStorage.getItem('nb_path') || 'data/reminders.json',
+  token: localStorage.getItem('nb_token') || ''
+};
+
+let reminders = [];
+let sha = null;
+
+function configured(){ return cfg.owner && cfg.repo && cfg.path && cfg.token; }
+
+function setStatus(msg, isError){
+  statusLine.textContent = msg || '';
+  statusLine.style.color = isError ? '#ffb4a8' : '#f2ecddaa';
+}
+
+function apiUrl(){
+  return `https://api.github.com/repos/${cfg.owner}/${cfg.repo}/contents/${cfg.path}`;
+}
+
+function b64encode(str){ return btoa(unescape(encodeURIComponent(str))); }
+function b64decode(str){ return decodeURIComponent(escape(atob(str))); }
+
+async function loadReminders(){
+  if(!configured()){
+    setStatus('Open settings and connect a GitHub repo to get started.');
+    render();
+    return;
+  }
+  setStatus('Loading board…');
+  try{
+    const res = await fetch(apiUrl(), {
+      headers:{ Authorization:`Bearer ${cfg.token}`, Accept:'application/vnd.github+json' }
+    });
+    if(res.status === 404){
+      reminders = [];
+      sha = null;
+      setStatus('No board file yet — pin your first reminder to create it.');
+      render();
+      return;
+    }
+    if(!res.ok) throw new Error(`GitHub read failed (${res.status})`);
+    const data = await res.json();
+    sha = data.sha;
+    reminders = JSON.parse(b64decode(data.content));
+    setStatus(`Loaded ${reminders.length} reminder(s).`);
+  }catch(err){
+    setStatus(err.message, true);
+  }
+  render();
+}
+
+async function saveReminders(){
+  if(!configured()){
+    setStatus('Connect a GitHub repo in settings first.', true);
+    return false;
+  }
+  setStatus('Saving…');
+  try{
+    const body = {
+      message:`Update reminders (${reminders.length} pinned)`,
+      content:b64encode(JSON.stringify(reminders, null, 2)),
+      ...(sha ? {sha} : {})
+    };
+    const res = await fetch(apiUrl(), {
+      method:'PUT',
+      headers:{ Authorization:`Bearer ${cfg.token}`, Accept:'application/vnd.github+json' },
+      body:JSON.stringify(body)
+    });
+    if(!res.ok) throw new Error(`GitHub save failed (${res.status})`);
+    const data = await res.json();
+    sha = data.content.sha;
+    setStatus('Saved.');
+    return true;
+  }catch(err){
+    setStatus(err.message, true);
+    return false;
+  }
+}
+
+function scheduleLabel(r){
+  if(r.type === 'once') return `Once on ${r.date} at ${r.time}`;
+  if(r.type === 'daily') return `Daily at ${r.time}`;
+  if(r.type === 'weekly') return `Every ${WEEKDAYS[r.weekday]} at ${r.time}`;
+  return '';
+}
+
+function render(){
+  board.innerHTML = '';
+  countLabel.textContent = `${reminders.length} of ${MAX_REMINDERS} pinned`;
+
+  reminders.forEach((r, i) => {
+    const rot = (i % 2 === 0 ? -1 : 1) * (2 + (i % 3));
+    const card = document.createElement('div');
+    card.className = 'card';
+    card.style.setProperty('--rot', rot + 'deg');
+    card.innerHTML = `
+      <div class="pin"></div>
+      <div class="message"></div>
+      <div class="schedule"></div>
+      <div class="card-actions"><button data-action="delete">Unpin</button></div>
+    `;
+    card.querySelector('.message').textContent = r.message;
+    card.querySelector('.schedule').textContent = scheduleLabel(r);
+    card.querySelector('[data-action="delete"]').addEventListener('click', () => deleteReminder(r.id));
+    board.appendChild(card);
+  });
+
+  if(reminders.length < MAX_REMINDERS){
+    const addCard = document.createElement('button');
+    addCard.className = 'card add-card';
+    addCard.textContent = '+ Pin a reminder';
+    addCard.addEventListener('click', openDialog);
+    board.appendChild(addCard);
+  }
+}
+
+async function deleteReminder(id){
+  reminders = reminders.filter(r => r.id !== id);
+  render();
+  await saveReminders();
+}
+
+function openDialog(){
+  document.getElementById('rMessage').value = '';
+  document.getElementById('rType').value = 'once';
+  document.getElementById('rDate').value = '';
+  document.getElementById('rWeekday').value = '0';
+  document.getElementById('rTime').value = '';
+  toggleScheduleFields();
+  document.getElementById('cardDialog').showModal();
+}
+
+function toggleScheduleFields(){
+  const type = document.getElementById('rType').value;
+  document.getElementById('rDateField').style.display = type === 'once' ? 'block' : 'none';
+  document.getElementById('rWeekdayField').style.display = type === 'weekly' ? 'block' : 'none';
+}
+
+document.getElementById('rType').addEventListener('change', toggleScheduleFields);
+
+document.getElementById('saveBtn').addEventListener('click', async () => {
+  const message = document.getElementById('rMessage').value.trim();
+  const type = document.getElementById('rType').value;
+  const time = document.getElementById('rTime').value;
+  if(!message || !time) return;
+  if(reminders.length >= MAX_REMINDERS) return;
+
+  const reminder = { id: crypto.randomUUID(), message, type, time };
+  if(type === 'once'){
+    const date = document.getElementById('rDate').value;
+    if(!date) return;
+    reminder.date = date;
+  }
+  if(type === 'weekly'){
+    reminder.weekday = Number(document.getElementById('rWeekday').value);
+  }
+
+  reminders.push(reminder);
+  document.getElementById('cardDialog').close();
+  render();
+  await saveReminders();
+});
+
+document.getElementById('cancelBtn').addEventListener('click', () => {
+  document.getElementById('cardDialog').close();
+});
+
+document.getElementById('refreshBtn').addEventListener('click', loadReminders);
+
+document.getElementById('settingsBtn').addEventListener('click', () => {
+  document.getElementById('ghOwner').value = cfg.owner;
+  document.getElementById('ghRepo').value = cfg.repo;
+  document.getElementById('ghPath').value = cfg.path;
+  document.getElementById('ghToken').value = cfg.token;
+  document.getElementById('settingsDialog').showModal();
+});
+
+document.getElementById('settingsCancel').addEventListener('click', () => {
+  document.getElementById('settingsDialog').close();
+});
+
+document.getElementById('settingsSave').addEventListener('click', () => {
+  cfg.owner = document.getElementById('ghOwner').value.trim();
+  cfg.repo = document.getElementById('ghRepo').value.trim();
+  cfg.path = document.getElementById('ghPath').value.trim() || 'data/reminders.json';
+  cfg.token = document.getElementById('ghToken').value.trim();
+  localStorage.setItem('nb_owner', cfg.owner);
+  localStorage.setItem('nb_repo', cfg.repo);
+  localStorage.setItem('nb_path', cfg.path);
+  localStorage.setItem('nb_token', cfg.token);
+  document.getElementById('settingsDialog').close();
+  loadReminders();
+});
+
+loadReminders();
+</script>
+</body>
+</html>
