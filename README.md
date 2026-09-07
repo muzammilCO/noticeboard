@@ -3,100 +3,136 @@
 Pin up to 5 reminders, each with its own schedule: once on a specific
 date, daily, or weekly on a specific day. A reminder fires automatically
 at its scheduled time via a push notification (ntfy). Deleting a
-reminder stops its schedule immediately — nothing else reads it once
-it's gone.
+reminder stops its schedule immediately.
+
+Two Cloudflare Workers do the work, mirroring the supplement tracker's
+`notifier` / `supplement-sync` split:
+
+- **`noticeboard-sync`** — holds the GitHub token, proxies reads/writes
+  of `data/reminders.json` so the browser never sees the token.
+- **`noticeboard-notifier`** — fires every 5 minutes and dispatches the
+  GitHub Action that actually checks schedules and sends to ntfy.
 
 ## How it fits together
 
 ```
 index.html (GitHub Pages)
-   |  create / delete reminders
+   |  GET/POST reminders
    v
-data/reminders.json (this repo, via GitHub Contents API)
+noticeboard-sync (Cloudflare Worker)
+   |  reads/writes via GitHub Contents API
+   v
+data/reminders.json (this repo)
 
-Cloudflare Cron Trigger (every 5 minutes)
-   |
+
+noticeboard-notifier (Cloudflare Worker, Cron Trigger every 5 min)
+   |  dispatches
    v
-worker.js  --dispatches-->  send-notification.yml (workflow_dispatch)
-                                  |
-                            checks out repo, reads data/reminders.json,
-                            works out which reminders are due (IST),
-                            sends due ones to ntfy, records that in
-                            data/notification-log.json, commits it back
-                                  |
-                                  v
-                             your phone
+send-notification.yml (GitHub Action, workflow_dispatch)
+   |  checks out repo, reads data/reminders.json,
+   |  works out what's due (IST), sends to ntfy,
+   |  logs sent state in data/notification-log.json, commits it back
+   v
+your phone
 ```
 
-- The web page only creates and deletes reminders. It never triggers a
-  send itself.
-- The Cloudflare Worker's only job is to dispatch the GitHub Action, on a
-  5-minute schedule (and on-demand via `/send`, for testing).
-- The Action does the real work: reads the reminders, checks each one's
-  schedule against the current time in IST, and sends any that are due
-  and haven't already been sent today.
-- `data/notification-log.json` is what prevents a daily/weekly reminder
-  from re-firing every 5 minutes for the rest of the day — it's written
-  only by the Action, never by the page.
+- The page only ever talks to `noticeboard-sync` — never to GitHub
+  directly, and never holds a GitHub token.
+- `noticeboard-notifier` never talks to ntfy itself — its only job is
+  to trigger the Action on schedule.
+- The Action does the real work: evaluates each reminder's schedule
+  against the current time, sends due ones, and tracks "already sent
+  today" in `data/notification-log.json` so a daily/weekly reminder
+  fires once, not every 5 minutes.
+- Deleting a reminder just removes it from `data/reminders.json` via
+  `noticeboard-sync` — nothing else reads it after that, so its
+  schedule stops right away.
 
-## Reminder schedule types
+## Repo structure
 
-- **Once** — fires on a specific date, at a specific time.
-- **Daily** — fires every day at a specific time.
-- **Weekly** — fires on a specific day of the week, at a specific time.
+```
+noticeboard/
+├── index.html
+├── data/
+│   └── reminders.json
+├── workers/
+│   ├── sync/
+│   │   ├── sync-worker.js
+│   │   └── wrangler.toml
+│   └── notifier/
+│       ├── notifier-worker.js
+│       └── wrangler.toml
+└── .github/workflows/
+    └── send-notification.yml
+```
 
-Deleting a reminder from the board removes it from `data/reminders.json`
-entirely, so it's no longer read by the Action and stops firing right
-away — the schedule doesn't need separate cleanup.
+## Setup
 
-## 1. Set up the repo
+### 1. Repo + Pages
+- Push this folder to a new GitHub repo (e.g. `noticeboard`).
+- Settings → Pages → deploy from `main`, root folder.
+- Add a repository secret `NTFY_TOPIC` (Settings → Secrets and
+  variables → Actions) set to your ntfy topic name.
 
-1. Push this folder to a new GitHub repo (e.g. `noticeboard`).
-2. Enable GitHub Pages for it (Settings → Pages → deploy from the `main`
-   branch, root folder). Your board will be live at
-   `https://<you>.github.io/noticeboard/`.
-3. `data/reminders.json` starts as an empty list — the page maintains it.
-4. Add a repository secret `NTFY_TOPIC` (Settings → Secrets and variables
-   → Actions) set to your ntfy topic name.
+### 2. ntfy
+- Install the ntfy app, subscribe to a topic name of your choosing
+  (not easily guessable, e.g. `muzz-noticeboard-8f2a`). Use this same
+  name for the `NTFY_TOPIC` secret above.
 
-## 2. Create a GitHub token for the page to use
+### 3. A GitHub token for the sync worker
+- Fine-grained PAT, scoped to this repo only, **Contents: Read and
+  write**.
 
-A fine-grained PAT scoped to this repo, with **Contents: Read and
-write**. Paste it into the board's settings panel — it's stored only in
-that browser's localStorage.
-
-## 3. Create a second GitHub token for the Worker
-
-Another fine-grained PAT scoped to this repo, with **Actions: Read and
-write** — this is what lets the Worker dispatch the workflow.
-
-## 4. Set up ntfy
-
-Install the [ntfy app](https://ntfy.sh/) and subscribe to a topic name of
-your choosing (pick something not easily guessable, e.g.
-`muzz-noticeboard-8f2a`). Use the same name for the `NTFY_TOPIC` secret
-above.
-
-## 5. Deploy the Cloudflare Worker
-
+### 4. Deploy `noticeboard-sync`
 ```bash
-npm install -g wrangler
+cd workers/sync
+npm install -g wrangler   # if not already installed
 wrangler login
 ```
-
-Edit `wrangler.toml` with your GitHub owner/repo, then:
-
+Edit `wrangler.toml`: set `GITHUB_OWNER` to your username.
 ```bash
-wrangler secret put GITHUB_TOKEN   # the Actions:read/write PAT from step 3
+wrangler secret put GITHUB_TOKEN   # the token from step 3
+wrangler secret put SYNC_PIN       # make up a short PIN, e.g. 0907
 wrangler deploy
 ```
+Note the URL it prints (`https://noticeboard-sync.<you>.workers.dev`).
 
-The `[triggers]` cron in `wrangler.toml` starts firing automatically
-once deployed — no extra step needed.
+### 5. Connect the page
+- Open your GitHub Pages URL, click the gear icon.
+- The Worker URL is pre-filled with the default — only change it if you
+  deployed under a different name.
+- Enter the PIN you set in step 4, save.
+- You can now pin and delete reminders — the PIN is stored in that
+  browser's localStorage and sent only to your Worker URL; the real
+  GitHub token never leaves the Worker. Repeat this step (PIN only, URL
+  is already defaulted) on each new device.
+
+### 6. A second GitHub token for the notifier worker
+- Another fine-grained PAT, scoped to this repo, **Actions: Read and
+  write** — this is what lets it dispatch the workflow.
+
+### 7. Deploy `noticeboard-notifier`
+```bash
+cd workers/notifier
+```
+Edit `wrangler.toml`: set `GITHUB_OWNER` to your username.
+```bash
+wrangler secret put GITHUB_TOKEN   # the token from step 6
+wrangler deploy
+```
+The cron trigger starts firing automatically once deployed.
+
+### 8. Test it
+- Pin a reminder for a couple of minutes from now.
+- Wait for the next 5-minute tick (or check the repo's Actions tab to
+  confirm the workflow runs). You should get a push via ntfy.
 
 ## Notes
 
-- The Worker's `/send` endpoint has no auth — fine for a personal tool,
-  but add a shared-secret check if that matters to you.
-- Times are evaluated in IST (`Asia/Kolkata`). Change the `TZ` value in
-  the workflow if you need a different timezone.
+- Times are evaluated in IST (`Asia/Kolkata`) — change the `TZ` value
+  in `send-notification.yml` if you need a different timezone.
+- The sync worker checks a PIN (`SYNC_PIN`) before reading or writing —
+  anyone without it can't touch your reminders, even with the Worker URL.
+- The notifier worker has no auth — it only responds "alive" over HTTP
+  and does everything else on its own cron schedule, so there's nothing
+  for an outsider to trigger.

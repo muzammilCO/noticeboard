@@ -216,7 +216,7 @@
 <header>
   <div>
     <h1>Noticeboard</h1>
-    <div class="sub" id="countLabel">0 of 5 pinned</div>
+    <div class="sub" id="countLabel">0 pinned</div>
   </div>
   <button class="icon-btn" id="settingsBtn" title="Settings">&#9881;</button>
 </header>
@@ -274,84 +274,66 @@
 
 <dialog id="settingsDialog">
   <div class="dialog-inner">
-    <h2>Board settings</h2>
+    <h2>Sync settings</h2>
+    <p class="hint" style="margin:-6px 0 16px; font-size:0.8rem; line-height:1.5;">
+      Connect this app to your GitHub repo so pinned reminders and their
+      schedules sync across every device. Uses a small proxy (see README)
+      so you never paste a long GitHub token here — just a short PIN.
+    </p>
     <div class="field">
-      <label for="ghOwner">GitHub owner</label>
-      <input id="ghOwner" placeholder="your-username">
+      <label for="syncUrl">Worker URL</label>
+      <input id="syncUrl" placeholder="https://noticeboard-sync.yourname.workers.dev">
+      <div class="hint">Defaults to noticeboard-sync.yourname.workers.dev — clear the field and save if you ever point this at a different Worker.</div>
     </div>
     <div class="field">
-      <label for="ghRepo">Repository</label>
-      <input id="ghRepo" placeholder="noticeboard">
-    </div>
-    <div class="field">
-      <label for="ghPath">Data file path</label>
-      <input id="ghPath" placeholder="data/reminders.json">
-    </div>
-    <div class="field">
-      <label for="ghToken">GitHub token (fine-grained, Contents: read/write)</label>
-      <input id="ghToken" type="password" placeholder="github_pat_...">
-      <div class="hint">Stored only in this browser's localStorage.</div>
+      <label for="syncPin">Sync PIN</label>
+      <input id="syncPin" inputmode="numeric" placeholder="0907">
+      <div class="hint">The PIN is stored only in this browser's local storage and sent only to your Worker URL. The real GitHub token never leaves the Worker. Set up once per device.</div>
     </div>
     <div class="dialog-actions">
-      <button class="btn-secondary" id="settingsCancel">Close</button>
+      <button class="btn-secondary" id="clearPinBtn" style="margin-right:auto;">Clear PIN</button>
+      <button class="btn-secondary" id="settingsCancel">Cancel</button>
       <button class="btn-primary" id="settingsSave">Save</button>
     </div>
   </div>
 </dialog>
 
 <script>
-const MAX_REMINDERS = 5;
 const board = document.getElementById('board');
 const statusLine = document.getElementById('statusLine');
 const countLabel = document.getElementById('countLabel');
 const WEEKDAYS = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
 
+const DEFAULT_SYNC_URL = 'https://noticeboard-sync.muzammil-coe-219-dtu.workers.dev';
+
 const cfg = {
-  owner: localStorage.getItem('nb_owner') || '',
-  repo: localStorage.getItem('nb_repo') || '',
-  path: localStorage.getItem('nb_path') || 'data/reminders.json',
-  token: localStorage.getItem('nb_token') || ''
+  syncUrl: localStorage.getItem('nb_sync_url') || DEFAULT_SYNC_URL,
+  pin: localStorage.getItem('nb_sync_pin') || ''
 };
 
 let reminders = [];
-let sha = null;
 
-function configured(){ return cfg.owner && cfg.repo && cfg.path && cfg.token; }
+function configured(){ return !!cfg.syncUrl && !!cfg.pin; }
 
 function setStatus(msg, isError){
   statusLine.textContent = msg || '';
   statusLine.style.color = isError ? '#ffb4a8' : '#f2ecddaa';
 }
 
-function apiUrl(){
-  return `https://api.github.com/repos/${cfg.owner}/${cfg.repo}/contents/${cfg.path}`;
-}
-
-function b64encode(str){ return btoa(unescape(encodeURIComponent(str))); }
-function b64decode(str){ return decodeURIComponent(escape(atob(str))); }
+function syncUrl(){ return cfg.syncUrl.replace(/\/$/, ''); }
 
 async function loadReminders(){
   if(!configured()){
-    setStatus('Open settings and connect a GitHub repo to get started.');
+    setStatus('Open settings and enter your sync PIN to get started.');
     render();
     return;
   }
   setStatus('Loading board…');
   try{
-    const res = await fetch(apiUrl(), {
-      headers:{ Authorization:`Bearer ${cfg.token}`, Accept:'application/vnd.github+json' }
-    });
-    if(res.status === 404){
-      reminders = [];
-      sha = null;
-      setStatus('No board file yet — pin your first reminder to create it.');
-      render();
-      return;
-    }
-    if(!res.ok) throw new Error(`GitHub read failed (${res.status})`);
-    const data = await res.json();
-    sha = data.sha;
-    reminders = JSON.parse(b64decode(data.content));
+    const res = await fetch(`${syncUrl()}?pin=${encodeURIComponent(cfg.pin)}`, { method:'GET' });
+    const data = await res.json().catch(() => null);
+    if(!res.ok) throw new Error((data && data.error) || `Sync read failed (${res.status})`);
+    reminders = Array.isArray(data) ? data : [];
     setStatus(`Loaded ${reminders.length} reminder(s).`);
   }catch(err){
     setStatus(err.message, true);
@@ -361,24 +343,18 @@ async function loadReminders(){
 
 async function saveReminders(){
   if(!configured()){
-    setStatus('Connect a GitHub repo in settings first.', true);
+    setStatus('Enter your sync PIN in settings first.', true);
     return false;
   }
   setStatus('Saving…');
   try{
-    const body = {
-      message:`Update reminders (${reminders.length} pinned)`,
-      content:b64encode(JSON.stringify(reminders, null, 2)),
-      ...(sha ? {sha} : {})
-    };
-    const res = await fetch(apiUrl(), {
-      method:'PUT',
-      headers:{ Authorization:`Bearer ${cfg.token}`, Accept:'application/vnd.github+json' },
-      body:JSON.stringify(body)
+    const res = await fetch(syncUrl(), {
+      method:'POST',
+      headers:{ 'Content-Type':'application/json' },
+      body: JSON.stringify({ pin: cfg.pin, reminders })
     });
-    if(!res.ok) throw new Error(`GitHub save failed (${res.status})`);
-    const data = await res.json();
-    sha = data.content.sha;
+    const data = await res.json().catch(() => ({}));
+    if(!res.ok || data.ok === false) throw new Error(data.error || `Sync write failed (${res.status})`);
     setStatus('Saved.');
     return true;
   }catch(err){
@@ -396,7 +372,7 @@ function scheduleLabel(r){
 
 function render(){
   board.innerHTML = '';
-  countLabel.textContent = `${reminders.length} of ${MAX_REMINDERS} pinned`;
+  countLabel.textContent = `${reminders.length} pinned`;
 
   reminders.forEach((r, i) => {
     const rot = (i % 2 === 0 ? -1 : 1) * (2 + (i % 3));
@@ -415,13 +391,11 @@ function render(){
     board.appendChild(card);
   });
 
-  if(reminders.length < MAX_REMINDERS){
-    const addCard = document.createElement('button');
-    addCard.className = 'card add-card';
-    addCard.textContent = '+ Pin a reminder';
-    addCard.addEventListener('click', openDialog);
-    board.appendChild(addCard);
-  }
+  const addCard = document.createElement('button');
+  addCard.className = 'card add-card';
+  addCard.textContent = '+ Pin a reminder';
+  addCard.addEventListener('click', openDialog);
+  board.appendChild(addCard);
 }
 
 async function deleteReminder(id){
@@ -453,7 +427,6 @@ document.getElementById('saveBtn').addEventListener('click', async () => {
   const type = document.getElementById('rType').value;
   const time = document.getElementById('rTime').value;
   if(!message || !time) return;
-  if(reminders.length >= MAX_REMINDERS) return;
 
   const reminder = { id: crypto.randomUUID(), message, type, time };
   if(type === 'once'){
@@ -478,11 +451,18 @@ document.getElementById('cancelBtn').addEventListener('click', () => {
 document.getElementById('refreshBtn').addEventListener('click', loadReminders);
 
 document.getElementById('settingsBtn').addEventListener('click', () => {
-  document.getElementById('ghOwner').value = cfg.owner;
-  document.getElementById('ghRepo').value = cfg.repo;
-  document.getElementById('ghPath').value = cfg.path;
-  document.getElementById('ghToken').value = cfg.token;
+  document.getElementById('syncUrl').value = cfg.syncUrl;
+  document.getElementById('syncPin').value = cfg.pin;
   document.getElementById('settingsDialog').showModal();
+});
+
+document.getElementById('clearPinBtn').addEventListener('click', () => {
+  cfg.pin = '';
+  localStorage.removeItem('nb_sync_pin');
+  document.getElementById('syncPin').value = '';
+  document.getElementById('settingsDialog').close();
+  setStatus('PIN cleared.');
+  render();
 });
 
 document.getElementById('settingsCancel').addEventListener('click', () => {
@@ -490,14 +470,10 @@ document.getElementById('settingsCancel').addEventListener('click', () => {
 });
 
 document.getElementById('settingsSave').addEventListener('click', () => {
-  cfg.owner = document.getElementById('ghOwner').value.trim();
-  cfg.repo = document.getElementById('ghRepo').value.trim();
-  cfg.path = document.getElementById('ghPath').value.trim() || 'data/reminders.json';
-  cfg.token = document.getElementById('ghToken').value.trim();
-  localStorage.setItem('nb_owner', cfg.owner);
-  localStorage.setItem('nb_repo', cfg.repo);
-  localStorage.setItem('nb_path', cfg.path);
-  localStorage.setItem('nb_token', cfg.token);
+  cfg.syncUrl = document.getElementById('syncUrl').value.trim() || DEFAULT_SYNC_URL;
+  cfg.pin = document.getElementById('syncPin').value.trim();
+  localStorage.setItem('nb_sync_url', cfg.syncUrl);
+  localStorage.setItem('nb_sync_pin', cfg.pin);
   document.getElementById('settingsDialog').close();
   loadReminders();
 });
