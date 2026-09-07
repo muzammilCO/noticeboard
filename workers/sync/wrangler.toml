@@ -1,0 +1,13 @@
+name = "noticeboard-sync"
+main = "sync-worker.js"
+compatibility_date = "2024-01-01"
+
+[vars]
+GITHUB_OWNER = "your-username"
+GITHUB_REPO = "noticeboard"
+GITHUB_PATH = "data/reminders.json"
+GITHUB_BRANCH = "main"
+
+# Set the secrets with:
+#   wrangler secret put GITHUB_TOKEN
+#   wrangler secret put SYNC_PIN
